@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkillSwap Campus - Peer-to-Peer Skill Bank</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col justify-between">
+
+    <!-- Navigation Bar -->
+    <nav class="border-b border-slate-800 bg-slate-900/80 backdrop-blur sticky top-0 z-50">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
+            <div class="flex items-center space-x-2 cursor-pointer" onclick="switchTab('explore')">
+                <span class="text-2xl">🔄</span>
+                <span class="font-bold text-xl bg-gradient-to-r from-cyan-400 to-purple-500 bg-clip-text text-transparent">SkillSwap</span>
+            </div>
+            
+            <div class="flex items-center space-x-3 text-sm">
+                <!-- Language Selector -->
+                <select id="langSelect" onchange="changeLanguage(this.value)" class="bg-slate-800 text-xs text-cyan-400 border border-slate-700 rounded-lg px-2 py-1.5 font-medium focus:outline-none">
+                    <option value="en">English 🇬🇧</option>
+                    <option value="mr">मराठी 🇮🇳</option>
+                    <option value="hi">हिंदी 🇮🇳</option>
+                </select>
+
+                <button onclick="switchTab('explore')" data-i18n="nav_explore" class="hover:text-cyan-400 font-medium transition">Explore</button>
+                <button onclick="switchTab('add')" data-i18n="nav_teach" class="bg-cyan-500/10 text-cyan-400 px-3 py-1.5 rounded-lg border border-cyan-500/30 font-semibold hover:bg-cyan-500/20 transition">+ Teach</button>
+                
+                <!-- Credit Wallet Badge -->
+                <div class="bg-amber-500/10 border border-amber-500/30 text-amber-400 px-3 py-1.5 rounded-full flex items-center space-x-1 font-bold">
+                    <span>🪙</span>
+                    <span id="creditCount">5</span>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="max-w-4xl mx-auto p-4 w-full flex-grow">
+
+        <!-- HERO SECTION (HOME) -->
+        <section id="exploreTab" class="space-y-6">
+            <div class="text-center py-6 bg-slate-900/40 rounded-3xl border border-slate-800/80 p-6">
+                <span class="bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wider">🚀 Startup MVP</span>
+                <h1 data-i18n="hero_title" class="text-3xl md:text-4xl font-extrabold mt-3 mb-2">Campus Skill Bank</h1>
+                <p data-i18n="hero_subtitle" class="text-slate-400 text-sm md:text-base max-w-xl mx-auto">Learn without money! Teach skills, earn credits, and gain knowledge.</p>
+                
+                <!-- Action Buttons -->
+                <div class="flex justify-center space-x-3 mt-5">
+                    <button onclick="switchTab('explore')" data-i18n="btn_explore_now" class="bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold px-5 py-2.5 rounded-xl transition text-sm">Explore Skills</button>
+                    <button onclick="switchTab('add')" data-i18n="btn_teach_now" class="bg-slate-800 hover:bg-slate-700 text-white font-semibold px-5 py-2.5 rounded-xl border border-slate-700 transition text-sm">Teach & Earn Credits</button>
+                </div>
+            </div>
+
+            <!-- Search Bar -->
+            <div class="relative">
+                <input type="text" id="searchInput" onkeyup="filterSkills()" placeholder="Search skills (e.g., Python, Figma, Video Editing)..." class="w-full bg-slate-900 border border-slate-800 rounded-xl px-4 py-3 pl-10 text-sm focus:outline-none focus:border-cyan-500 text-white">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3.5 text-slate-500 text-sm"></i>
+            </div>
+
+            <!-- Notification Toast -->
+            <div id="toast" class="hidden bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 p-3 rounded-xl text-sm text-center font-medium"></div>
+
+            <!-- Skills Cards Grid -->
+            <div id="skillsContainer" class="grid md:grid-cols-2 gap-4">
+                <!-- Dynamic cards injected via JS -->
+            </div>
+        </section>
+
+        <!-- TAB 2: TEACH A SKILL (ADD FORM) -->
+        <section id="addTab" class="hidden max-w-lg mx-auto bg-slate-900 p-6 rounded-2xl border border-slate-800 mt-4">
+            <h2 data-i18n="form_title" class="text-xl font-bold mb-4 text-cyan-400 text-center">List Your Skill (+2 Credits)</h2>
+            <form id="skillForm" onsubmit="addNewSkill(event)" class="space-y-4">
+                <div>
+                    <label data-i18n="lbl_name" class="block text-xs font-semibold text-slate-400 mb-1">Your Name</label>
+                    <input type="text" id="userName" required placeholder="e.g. Rahul Sharma" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-cyan-500 text-white">
+                </div>
+                <div>
+                    <label data-i18n="lbl_skill" class="block text-xs font-semibold text-slate-400 mb-1">What can you teach? (Skill Title)</label>
+                    <input type="text" id="skillTitle" required placeholder="e.g. React.js Basics, Video Editing" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-cyan-500 text-white">
+                </div>
+                <div>
+                    <label data-i18n="lbl_category" class="block text-xs font-semibold text-slate-400 mb-1">Category</label>
+                    <select id="skillCategory" class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-cyan-500 text-white">
+                        <option value="Coding">Coding & Tech</option>
+                        <option value="Design">Design & Media</option>
+                        <option value="Academics">Academics & Study</option>
+                        <option value="Music & Art">Music & Art</option>
+                    </select>
+                </div>
+                <div>
+                    <label data-i18n="lbl_desc" class="block text-xs font-semibold text-slate-400 mb-1">Short Description</label>
+                    <textarea id="skillDesc" rows="3" required placeholder="Describe what you will teach and preferred timing..." class="w-full bg-slate-950 border border-slate-800 rounded-lg p-2.5 text-sm focus:border-cyan-500 text-white"></textarea>
+                </div>
+                <button type="submit" data-i18n="btn_publish" class="w-full bg-cyan-500 hover:bg-cyan-600 text-slate-950 font-bold py-3 rounded-xl transition">
+                    Publish Skill & Claim 2 Credits 🎉
+                </button>
+            </form>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-900 py-4 text-center text-xs text-slate-600">
+        SkillSwap Campus MVP • Built for College Students
+    </footer>
+
+    <!-- App Logic & Languages -->
+    <script>
+        const translations = {
+            en: {
+                nav_explore: "Explore",
+                nav_teach: "+ Teach",
+                hero_title: "Campus Skill Bank",
+                hero_subtitle: "Learn without money! Teach skills, earn credits, and gain knowledge.",
+                btn_explore_now: "Explore Skills",
+                btn_teach_now: "Teach & Earn Credits",
+                search_placeholder: "Search skills (e.g., Python, Figma, Video Editing)...",
+                form_title: "List Your Skill (+2 Credits)",
+                lbl_name: "Your Name",
+                lbl_skill: "What can you teach?",
+                lbl_category: "Category",
+                lbl_desc: "Short Description",
+                btn_publish: "Publish Skill & Claim 2 Credits 🎉",
+                btn_book: "Book Session",
+                credit_label: "Credit",
+                no_skills: "No skills found matching your search."
+            },
+            mr: {
+                nav_explore: "एक्सप्लोर",
+                nav_teach: "+ शिकवा",
+                hero_title: "कॅम्पस स्किल बँक",
+                hero_subtitle: "पैशाशिवाय शिका! कौशल्य द्या, क्रेडिट्स मिळवा आणि नवीन ज्ञान मिळवा.",
+                btn_explore_now: "कौशल्ये शोधा",
+                btn_teach_now: "शिकवा आणि क्रेडिट्स मिळवा",
+                search_placeholder: "स्किल शोधा (उदा. Python, Figma, व्हिडिओ एडिटींग)...",
+                form_title: "आपले Skill लिस्ट करा (+2 Credits)",
+                lbl_name: "तुमचे नाव",
+                lbl_skill: "तुम्ही काय शिकवू शकता?",
+                lbl_category: "प्रकार (Category)",
+                lbl_desc: "थोडक्यात माहिती",
+                btn_publish: "Skill पब्लिश करा आणि २ Credits मिळवा 🎉",
+                btn_book: "सेशन बुक करा",
+                credit_label: "क्रेडिट",
+                no_skills: "कोणतेही Skill सापडले नाही."
+            },
+            hi: {
+                nav_explore: "एक्सप्लोर",
+                nav_teach: "+ सिखाएं",
+                hero_title: "कैंपस स्किल बैंक",
+                hero_subtitle: "बिना पैसों के सीखें! स्किल सिखाएं, क्रेडिट्स कमाएं और ज्ञान बढ़ाएं।",
+                btn_explore_now: "स्किल खोजें",
+                btn_teach_now: "सिखाएं और क्रेडिट कमाएं",
+                search_placeholder: "स्किल खोजें (जैसे Python, Figma, वीडियो एडिटिंग)...",
+                form_title: "अपनी स्किल लिस्ट करें (+2 Credits)",
+                lbl_name: "आपका नाम",
+                lbl_skill: "आप क्या सिखा सकते हैं?",
+                lbl_category: "श्रेणी (Category)",
+                lbl_desc: "संक्षिप्त विवरण",
+                btn_publish: "स्किल पब्लिश करें और 2 क्रेडिट्स पाएं 🎉",
+                btn_book: "सेशन बुक करें",
+                credit_label: "क्रेडिट",
+                no_skills: "कोई स्किल नहीं मिली।"
+            }
+        };
+
+        let currentLang = localStorage.getItem('appLang') || 'en';
+
+        function changeLanguage(lang) {
+            currentLang = lang;
+            localStorage.setItem('appLang', lang);
+            document.getElementById('langSelect').value = lang;
+
+            document.querySelectorAll('[data-i18n]').forEach(elem => {
+                const key = elem.getAttribute('data-i18n');
+                if (translations[lang][key]) {
+                    elem.innerText = translations[lang][key];
+                }
+            });
+
+            document.getElementById('searchInput').placeholder = translations[lang].search_placeholder;
+            renderSkills(skillsArray);
+        }
+
+        let credits = localStorage.getItem('userCredits') ? parseInt(localStorage.getItem('userCredits')) : 5;
+        document.getElementById('creditCount').innerText = credits;
+
+        let skillsArray = JSON.parse(localStorage.getItem('campusSkills')) || [
+            { id: 1, name: "Aarav Patil", title: "Python Data Science Basics", category: "Coding", desc: "Can teach Python loops & Pandas basics in 1 hour session.", cost: 1 },
+            { id: 2, name: "Priya Deshmukh", title: "UI/UX Design in Figma", category: "Design", desc: "Mobile App Wireframing and Figma auto-layout for beginners.", cost: 1 },
+            { id: 3, name: "Sneha Kulkarni", title: "Guitar Basics for Beginners", category: "Music & Art", desc: "Learn 5 basic open chords and play songs in 10 days.", cost: 1 }
+        ];
+
+        function renderSkills(skillsToDisplay) {
+            const container = document.getElementById('skillsContainer');
+            container.innerHTML = "";
+
+            if (skillsToDisplay.length === 0) {
+                container.innerHTML = `<p class="text-slate-500 text-center col-span-2 py-8">${translations[currentLang].no_skills}</p>`;
+                return;
+            }
+
+            skillsToDisplay.forEach(item => {
+                container.innerHTML += `
+                    <div class="bg-slate-900 border border-slate-800 p-5 rounded-2xl space-y-3 flex flex-col justify-between hover:border-slate-700 transition">
+                        <div>
+                            <div class="flex justify-between items-start mb-2">
+                                <span class="bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[10px] font-bold px-2.5 py-0.5 rounded-full">${item.category}</span>
+                                <span class="text-xs text-amber-400 font-semibold">🪙 ${item.cost} ${translations[currentLang].credit_label}</span>
+                            </div>
+                            <h3 class="font-bold text-lg text-white">${item.title}</h3>
+                            <p class="text-xs text-slate-400 mt-1">${item.desc}</p>
+                        </div>
+                        <div class="pt-2 border-t border-slate-800/60 flex justify-between items-center">
+                            <span class="text-xs text-slate-500">👤 ${item.name}</span>
+                            <button onclick="bookSession('${item.title}', ${item.cost})" class="bg-cyan-500/10 hover:bg-cyan-500 hover:text-slate-950 border border-cyan-500/30 text-cyan-400 font-semibold text-xs px-3 py-1.5 rounded-lg transition">
+                                ${translations[currentLang].btn_book}
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+        }
+
+        function filterSkills() {
+            const query = document.getElementById('searchInput').value.toLowerCase();
+            const filtered = skillsArray.filter(s => s.title.toLowerCase().includes(query) || s.category.toLowerCase().includes(query));
+            renderSkills(filtered);
+        }
+
+        function bookSession(skillTitle, cost) {
+            if (credits >= cost) {
+                credits -= cost;
+                localStorage.setItem('userCredits', credits);
+                document.getElementById('creditCount').innerText = credits;
+                showToast(`🎉 Booked '${skillTitle}' successfully! 1 credit deducted.`);
+            } else {
+                showToast(`❌ Insufficient Credits! Please teach a skill to earn credits.`, true);
+            }
+        }
+
+        function addNewSkill(e) {
+            e.preventDefault();
+            const name = document.getElementById('userName').value;
+            const title = document.getElementById('skillTitle').value;
+            const category = document.getElementById('skillCategory').value;
+            const desc = document.getElementById('skillDesc').value;
+
+            const newSkill = { id: Date.now(), name, title, category, desc, cost: 1 };
+            skillsArray.unshift(newSkill);
+            localStorage.setItem('campusSkills', JSON.stringify(skillsArray));
+
+            credits += 2;
+            localStorage.setItem('userCredits', credits);
+            document.getElementById('creditCount').innerText = credits;
+
+            document.getElementById('skillForm').reset();
+            switchTab('explore');
+            showToast(`🚀 Skill Published! You earned 2 🪙 Credits.`);
+        }
+
+        function switchTab(tabName) {
+            if (tabName === 'explore') {
+                document.getElementById('exploreTab').classList.remove('hidden');
+                document.getElementById('addTab').classList.add('hidden');
+                renderSkills(skillsArray);
+            } else {
+                document.getElementById('addTab').classList.remove('hidden');
+                document.getElementById('exploreTab').classList.add('hidden');
+            }
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function showToast(msg, isError = false) {
+            const toast = document.getElementById('toast');
+            toast.innerText = msg;
+            toast.className = `p-3 rounded-xl text-sm text-center font-medium ${isError ? 'bg-red-500/20 border border-red-500/40 text-red-300' : 'bg-emerald-500/20 border border-emerald-500/40 text-emerald-300'}`;
+            toast.classList.remove('hidden');
+            setTimeout(() => toast.classList.add('hidden'), 4000);
+        }
+
+        changeLanguage(currentLang);
+    </script>
+</body>
+  </html>
+  
