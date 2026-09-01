@@ -1,0 +1,594 @@
+├── backend/
+│   ├── models/
+│   │   ├── User.js
+│   │   └── SwapRequest.js
+│   ├── routes/
+│   │   ├── auth.js
+│   │   └── swaps.js
+│   ├── package.json
+│   └── server.js
+├── frontend/
+│   ├── screens/
+│   │   ├── AuthScreen.js
+│   │   ├── ExploreScreen.js
+│   │   └── ProfileScreen.js
+│   ├── App.js
+│   ├── app.json
+│   └── package.json
+├── .gitignore
+└── README.md
+backend/package.json
+{
+  "name": "skillswap-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.3.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
+backend/models/User.js
+const mongoose = require('mongoose');
+
+const UserSchema = new mongoose.Schema({
+  name: { type: String, required: true },
+  email: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  skillsToTeach: [{ type: String }],
+  skillsToLearn: [{ type: String }],
+  creditBalance: { type: Number, default: 3 },
+  isVerified: { type: Boolean, default: false }
+}, { timestamps: true });
+
+module.exports = mongoose.model('User', UserSchema);
+backend/models/SwapRequest.js
+const mongoose = require('mongoose');
+
+const SwapRequestSchema = new mongoose.Schema({
+  learner: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  mentor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+  skill: { type: String, required: true },
+  status: { type: String, enum: ['pending', 'accepted', 'rejected'], default: 'pending' }
+}, { timestamps: true });
+
+module.exports = mongoose.model('SwapRequest', SwapRequestSchema);
+backend/routes/auth.js
+const express = require('express');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
+const User = require('../models/User');
+
+const router = express.Router();
+
+// College Email Verification Helper
+const isCollegeEmail = (email) => {
+  return email.endsWith('.edu') || email.includes('.ac.');
+};
+
+// User Sign Up
+router.post('/signup', async (req, res) => {
+  try {
+    const { name, email, password, skillsToTeach, skillsToLearn } = req.body;
+
+    if (!isCollegeEmail(email)) {
+      return res.status(400).json({ message: 'Please use a valid college email (.edu / .ac.in)' });
+    }
+
+    let user = await User.findOne({ email });
+    if (user) return res.status(400).json({ message: 'User already exists' });
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    user = new User({
+      name,
+      email,
+      password: hashedPassword,
+      skillsToTeach: skillsToTeach || [],
+      skillsToLearn: skillsToLearn || [],
+      creditBalance: 3,
+      isVerified: true
+    });
+
+    await user.save();
+
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'secretKey', { expiresIn: '7d' });
+    res.status(201).json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// User Login
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+    const user = await User.findOne({ email });
+    if (!user) return res.status(400).json({ message: 'Invalid credentials' });
+
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) return res.status(400).json({ message: 'Invalid credentials' });
+
+    const token = jwt.sign({ userId: user._id }, process.env.JWT_SECRET || 'secretKey', { expiresIn: '7d' });
+    res.json({ token, user });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+module.exports = router;
+backend/routes/swaps.js
+const express = require('express');
+const mongoose = require('mongoose');
+const User = require('../models/User');
+const SwapRequest = require('../models/SwapRequest');
+
+const router = express.Router();
+
+// Get all mentors for explore tab
+router.get('/explore', async (req, res) => {
+  try {
+    const users = await User.find().select('-password');
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Send Swap Request
+router.post('/request', async (req, res) => {
+  try {
+    const { learnerId, mentorId, skill } = req.body;
+    
+    const learner = await User.findById(learnerId);
+    if (learner.creditBalance < 1) {
+      return res.status(400).json({ message: 'Insufficient Skill Credits! Teach a skill to earn credits.' });
+    }
+
+    const swap = new SwapRequest({ learner: learnerId, mentor: mentorId, skill });
+    await swap.save();
+
+    res.status(201).json({ message: 'Swap request sent successfully', swap });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Approve Swap Request & Swap 1 Credit (Atomic Transaction)
+router.post('/approve', async (req, res) => {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const { requestId } = req.body;
+    const swap = await SwapRequest.findById(requestId).session(session);
+
+    if (!swap || swap.status !== 'pending') {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Invalid or processed request' });
+    }
+
+    const learner = await User.findById(swap.learner).session(session);
+    const mentor = await User.findById(swap.mentor).session(session);
+
+    if (learner.creditBalance < 1) {
+      await session.abortTransaction();
+      return res.status(400).json({ message: 'Learner no longer has enough credits.' });
+    }
+
+    // Transfer Credit Logic
+    learner.creditBalance -= 1;
+    mentor.creditBalance += 1;
+    swap.status = 'accepted';
+
+    await learner.save({ session });
+    await mentor.save({ session });
+    await swap.save({ session });
+
+    await session.commitTransaction();
+    session.endSession();
+
+    res.json({ message: 'Swap approved! 1 Credit transferred successfully.' });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    res.status(500).json({ error: err.message });
+      
+  }
+});
+
+module.exports = router;
+      backend/server.js
+      const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+require('dotenv').config();
+
+const app = express();
+app.use(express.json());
+app.use(cors());
+
+app.use('/api/auth', require('./routes/auth'));
+app.use('/api/swaps', require('./routes/swaps'));
+
+const PORT = process.env.PORT || 5000;
+const MONGO_URI = process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/skillswap';
+
+mongoose.connect(MONGO_URI)
+  .then(() => {
+    console.log('MongoDB Connected');
+    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+  })
+  .catch(err => console.error(err));
+      frontend/package.json
+      {
+  "name": "skillswap-frontend",
+  "version": "1.0.0",
+  "main": "node_modules/expo/AppEntry.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web"
+  },
+  "dependencies": {
+    "@expo/vector-icons": "^14.0.0",
+    "@react-navigation/bottom-tabs": "^6.5.20",
+    "@react-navigation/native": "^6.1.17",
+    "axios": "^1.6.8",
+    "expo": "~51.0.0",
+    "expo-status-bar": "~1.12.1",
+    "react": "18.2.0",
+    "react-native": "0.74.1",
+    "react-native-safe-area-context": "4.10.1",
+    "react-native-screens": "~3.31.1"
+  },
+  "devDependencies": {
+    "@babel/core": "^7.24.0"
+  },
+  "private": true
+}
+      frontend/app.json
+      {
+  "expo": {
+    "name": "SkillSwap Campus",
+    "slug": "skill-swap-campus",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      }
+    }
+  }
+}
+      frontend/screens/AuthScreen.js
+      import React, { useState } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import axios from 'axios';
+
+// Replace with your machine's local IP address or deployed backend URL
+const API_URL = 'http://192.168.1.10:5000/api/auth';
+
+export default function AuthScreen({ onLoginSuccess }) {
+  const [isLogin, setIsLogin] = useState(true);
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [skillsToTeach, setSkillsToTeach] = useState('');
+
+  const handleSubmit = async () => {
+    try {
+      const endpoint = isLogin ? '/login' : '/signup';
+      const payload = isLogin
+        ? { email, password }
+        : { name, email, password, skillsToTeach: skillsToTeach.split(',').map(s => s.trim()) };
+
+      const res = await axios.post(`${API_URL}${endpoint}`, payload);
+      Alert.alert('Success', isLogin ? 'Logged in successfully!' : 'Account created!');
+      onLoginSuccess(res.data.user);
+    } catch (err) {
+      Alert.alert('Error', err.response?.data?.message || 'Something went wrong');
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.logo}>🔄 SkillSwap Campus</Text>
+      <Text style={styles.subtext}>Peer-to-Peer Knowledge Bank</Text>
+
+      <View style={styles.formContainer}>
+        {!isLogin && (
+          <TextInput
+            placeholder="Full Name"
+            placeholderTextColor="#64748b"
+            style={styles.input}
+            value={name}
+            onChangeText={setName}
+          />
+        )}
+        <TextInput
+          placeholder="College Email (.edu)"
+          placeholderTextColor="#64748b"
+          style={styles.input}
+          value={email}
+          onChangeText={setEmail}
+          autoCapitalize="none"
+        />
+        <TextInput
+          placeholder="Password"
+          placeholderTextColor="#64748b"
+          secureTextEntry
+          style={styles.input}
+          value={password}
+          onChangeText={setPassword}
+        />
+        {!isLogin && (
+          <TextInput
+            placeholder="Skills to Teach (comma separated)"
+            placeholderTextColor="#64748b"
+            style={styles.input}
+            value={skillsToTeach}
+            onChangeText={setSkillsToTeach}
+          />
+        )}
+
+        <TouchableOpacity style={styles.btn} onPress={handleSubmit}>
+          <Text style={styles.btnText}>{isLogin ? 'Login' : 'Sign Up'}</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity onPress={() => setIsLogin(!isLogin)} style={styles.switchBtn}>
+          <Text style={styles.switchText}>
+            {isLogin ? "Don't have an account? Sign Up" : "Already registered? Login"}
+          </Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0f172a', justifyContent: 'center', padding: 24 },
+  logo: { fontSize: 28, fontWeight: 'bold', color: '#38bdf8', textAlign: 'center' },
+  subtext: { color: '#94a3b8', textAlign: 'center', marginBottom: 32, marginTop: 4 },
+  formContainer: { backgroundColor: '#1e293b', borderRadius: 16, padding: 20 },
+  input: { backgroundColor: '#0f172a', color: '#fff', padding: 14, borderRadius: 10, marginBottom: 14, borderWidth: 1, borderColor: '#334155' },
+  btn: { backgroundColor: '#38bdf8', padding: 14, borderRadius: 10, alignItems: 'center', marginTop: 8 },
+  btnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 16 },
+  switchBtn: { marginTop: 16, alignItems: 'center' },
+  switchText: { color: '#94a3b8', fontSize: 13 }
+});
+      frontend/screens/ExploreScreen.js
+            import React, { useState, useEffect } from 'react';
+import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import axios from 'axios';
+
+// Replace with your machine's local IP address or deployed backend URL
+const API_URL = 'http://192.168.1.10:5000/api/swaps';
+
+export default function ExploreScreen({ currentUser }) {
+  const [users, setUsers] = useState([]);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    fetchUsers();
+  }, []);
+
+  const fetchUsers = async () => {
+    try {
+      const res = await axios.get(`${API_URL}/explore`);
+      setUsers(res.data.filter(u => u._id !== currentUser._id));
+    } catch (err) {
+      console.log(err);
+    }
+  };
+
+  const handleRequestSwap = async (mentorId, skill) => {
+    try {
+      const res = await axios.post(`${API_URL}/request`, {
+        learnerId: currentUser._id,
+        mentorId,
+        skill
+      });
+      Alert.alert('Success 🎉', res.data.message);
+    } catch (err) {
+      Alert.alert('Booking Failed', err.response?.data?.message || 'Error sending request');
+    }
+  };
+
+  const filteredUsers = users.filter(user => 
+    user.skillsToTeach.some(s => s.toLowerCase().includes(search.toLowerCase()))
+  );
+
+  return (
+    <View style={styles.container}>
+      <Text style={styles.header}>Explore Peer Mentors</Text>
+      
+      <TextInput
+        placeholder="Search skill (e.g. React, UI Design)..."
+        placeholderTextColor="#64748b"
+        style={styles.searchBar}
+        value={search}
+        onChangeText={setSearch}
+      />
+
+      <FlatList
+        data={filteredUsers}
+        keyExtractor={(item) => item._id}
+        renderItem={({ item }) => (
+          <View style={styles.card}>
+            <View style={styles.cardHeader}>
+              <Text style={styles.userName}>{item.name}</Text>
+              <Text style={styles.creditCost}>🪙 1 Credit/hr</Text>
+            </View>
+
+            <Text style={styles.sectionLabel}>Can Teach:</Text>
+            <View style={styles.tagContainer}>
+              {item.skillsToTeach.map((skill, index) => (
+                <View key={index} style={styles.tag}>
+                  <Text style={styles.tagText}>{skill}</Text>
+                </View>
+              ))}
+            </View>
+
+            <TouchableOpacity
+              style={styles.swapBtn}
+              onPress={() => handleRequestSwap(item._id, item.skillsToTeach[0] || 'General Skill')}
+            >
+              <Text style={styles.swapBtnText}>Request Swap</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+      />
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0f172a', padding: 16, paddingTop: 50 },
+  header: { fontSize: 22, fontWeight: 'bold', color: '#fff', marginBottom: 16 },
+  searchBar: { backgroundColor: '#1e293b', color: '#fff', padding: 12, borderRadius: 12, marginBottom: 16, borderColor: '#334155', borderWidth: 1 },
+  card: { backgroundColor: '#1e293b', borderRadius: 16, padding: 16, marginBottom: 12, borderWidth: 1, borderColor: '#334155' },
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  userName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  creditCost: { color: '#f59e0b', fontWeight: '600', fontSize: 12 },
+  sectionLabel: { color: '#94a3b8', fontSize: 12, marginBottom: 6 },
+  tagContainer: { flexDirection: 'row', flexWrap: 'wrap', marginBottom: 14 },
+  tag: { backgroundColor: '#0284c720', borderColor: '#38bdf8', borderWidth: 1, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 20, marginRight: 6, marginBottom: 6 },
+  tagText: { color: '#38bdf8', fontSize: 12 },
+  swapBtn: { backgroundColor: '#38bdf8', paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  swapBtnText: { color: '#0f172a', fontWeight: 'bold' }
+});
+        frontend/screens/ProfileScreen.js
+        import React from 'react';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+
+export default function ProfileScreen({ user, onLogout }) {
+  return (
+    <View style={styles.container}>
+      <View style={styles.profileCard}>
+        <Text style={styles.avatar}>🎓</Text>
+        <Text style={styles.name}>{user.name}</Text>
+        <Text style={styles.email}>{user.email}</Text>
+
+        <View style={styles.badge}>
+          <Text style={styles.badgeText}>🪙 Skill Credits: {user.creditBalance}</Text>
+        </View>
+      </View>
+
+      <View style={styles.infoSection}>
+        <Text style={styles.title}>Skills I Can Teach</Text>
+        <Text style={styles.skillList}>
+          {user.skillsToTeach?.length ? user.skillsToTeach.join(', ') : 'None added yet'}
+        </Text>
+
+        <Text style={[styles.title, { marginTop: 16 }]}>Skills I Want to Learn</Text>
+        <Text style={styles.skillList}>
+          {user.skillsToLearn?.length ? user.skillsToLearn.join(', ') : 'None added yet'}
+        </Text>
+      </View>
+
+      <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
+        <Text style={styles.logoutText}>Log Out</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0f172a', padding: 20, paddingTop: 60 },
+  profileCard: { backgroundColor: '#1e293b', borderRadius: 20, padding: 24, alignItems: 'center', marginBottom: 20 },
+  avatar: { fontSize: 50, marginBottom: 8 },
+  name: { fontSize: 22, fontWeight: 'bold', color: '#fff' },
+  email: { color: '#94a3b8', fontSize: 14, marginBottom: 16 },
+  badge: { backgroundColor: '#f59e0b20', borderColor: '#f59e0b', borderWidth: 1, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  badgeText: { color: '#f59e0b', fontWeight: 'bold', fontSize: 16 },
+  infoSection: { backgroundColor: '#1e293b', borderRadius: 16, padding: 20 },
+  title: { color: '#38bdf8', fontWeight: 'bold', fontSize: 14 },
+  skillList: { color: '#fff', fontSize: 15, marginTop: 4 },
+  logoutBtn: { backgroundColor: '#ef444420', borderColor: '#ef4444', borderWidth: 1, padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 'auto', marginBottom: 20 },
+  logoutText: { color: '#ef4444', fontWeight: 'bold' }
+});
+        frontend/App.js
+      import React, { useState } from 'react';
+import { NavigationContainer } from '@react-navigation/native';
+import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
+import { Ionicons } from '@expo/vector-icons';
+
+import AuthScreen from './screens/AuthScreen';
+import ExploreScreen from './screens/ExploreScreen';
+import ProfileScreen from './screens/ProfileScreen';
+
+const Tab = createBottomTabNavigator();
+
+export default function App() {
+  const [currentUser, setCurrentUser] = useState(null);
+
+  if (!currentUser) {
+    return <AuthScreen onLoginSuccess={(user) => setCurrentUser(user)} />;
+  }
+
+  return (
+    <NavigationContainer>
+      <Tab.Navigator
+        screenOptions={({ route }) => ({
+          headerShown: false,
+          tabBarIcon: ({ color, size }) => {
+            let iconName = route.name === 'Explore' ? 'search' : 'person';
+            return <Ionicons name={iconName} size={size} color={color} />;
+          },
+          tabBarStyle: { backgroundColor: '#0f172a', borderTopColor: '#334155' },
+          tabBarActiveTintColor: '#38bdf8',
+          tabBarInactiveTintColor: '#64748b',
+        })}
+      >
+        <Tab.Screen name="Explore">
+          {() => <ExploreScreen currentUser={currentUser} />}
+        </Tab.Screen>
+        <Tab.Screen name="Profile">
+          {() => <ProfileScreen user={currentUser} onLogout={() => setCurrentUser(null)} />}
+        </Tab.Screen>
+      </Tab.Navigator>
+    </NavigationContainer>
+  );
+}
+      .gitignore
+      # Node dependencies
+node_modules/
+backend/node_modules/
+frontend/node_modules/
+
+# Environment files
+.env
+*.env
+
+# Expo / React Native
+frontend/.expo/
+frontend/dist/
+frontend/web-build/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+      cd frontend
+npm install
+npx expo start
+      
+      
